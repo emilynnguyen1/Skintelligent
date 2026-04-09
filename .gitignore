@@ -1,2 +1,3 @@
 data/*.csv
 *.DS_Store
+/skintelligent-frontend 1/skintelligent/node_modules

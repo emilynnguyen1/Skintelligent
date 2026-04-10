@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 
+import LoadingScreen from "./components/LoadingScreen";
 import Nav from "./components/Nav";
 import { ProtectedRoute, PublicOnlyRoute } from "./components/RouteGuards";
 import DashboardPage from "./pages/DashboardPage";
@@ -12,11 +13,13 @@ import ProductDetailPage from "./pages/ProductDetailPage";
 import ProfilePage from "./pages/ProfilePage";
 import SavedPage from "./pages/SavedPage";
 import SignupPage from "./pages/SignupPage";
+import { useAuth } from "./providers/AuthProvider";
 
 const navHiddenRoutes = new Set(["/login", "/signup", "/onboarding"]);
 
 export default function App() {
   const location = useLocation();
+  const { isLoading } = useAuth();
   const showNav = !navHiddenRoutes.has(location.pathname);
 
   useEffect(() => {
@@ -47,6 +50,13 @@ export default function App() {
           </Routes>
         </div>
       </main>
+      <LoadingScreen
+        active={isLoading}
+        eyebrow="Opening Skintelligent"
+        title="Give Us a Moment While We Prepare Your Dashboard"
+        message="We’re checking your session and getting the right experience ready for you."
+        chips={["Restoring your session", "Preparing your route", "Loading your workspace"]}
+      />
     </div>
   );
 }

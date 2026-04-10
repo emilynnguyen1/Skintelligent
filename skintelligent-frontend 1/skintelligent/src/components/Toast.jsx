@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 const HOLD_OFFSET = 18;
 const DISMISS_OFFSET = -96;
 const DISMISS_THRESHOLD = -44;
+const INTERACTIVE_SELECTOR = "[data-toast-interactive='true']";
 
 export default function Toast({
   toast,
@@ -22,6 +23,10 @@ export default function Toast({
   }, [isDragging]);
 
   const handlePointerDown = (event) => {
+    if (event.target instanceof Element && event.target.closest(INTERACTIVE_SELECTOR)) {
+      return;
+    }
+
     pointerIdRef.current = event.pointerId;
     startYRef.current = event.clientY;
     setIsDragging(true);
@@ -108,7 +113,20 @@ export default function Toast({
         type="button"
         className="toast-card__close"
         aria-label="Dismiss notification"
-        onClick={() => onDismiss(toast.id)}
+        data-toast-interactive="true"
+        onPointerDown={(event) => {
+          event.stopPropagation();
+        }}
+        onPointerUp={(event) => {
+          event.stopPropagation();
+        }}
+        onPointerCancel={(event) => {
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDismiss(toast.id);
+        }}
       >
         x
       </button>

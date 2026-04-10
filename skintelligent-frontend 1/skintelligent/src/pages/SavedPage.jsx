@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -6,6 +7,7 @@ import {
   useSavedProductAnalyses,
   useSavedProductsQuery,
 } from "../api/hooks";
+import LoadingScreen from "../components/LoadingScreen";
 import { PageTransition, Reveal, StaggerGroup } from "../components/Motion";
 import { SectionHeadingSkeleton } from "../components/PageSkeletons";
 import ProductCard from "../components/ProductCard";
@@ -21,15 +23,19 @@ const productGridStyle = {
   gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
   gap: "1.5rem",
 };
+const cardExitDurationMs = 520;
 
 export default function SavedPage() {
   const navigate = useNavigate();
+  const [pendingProductId, setPendingProductId] = useState(null);
+  const [cardTransitions, setCardTransitions] = useState([]);
   const savedProductsQuery = useSavedProductsQuery(true);
   const productIds = (savedProductsQuery.data || []).map((product) => product.product_id);
   const analyses = useSavedProductAnalyses(productIds, productIds.length > 0);
   const saveProductMutation = useSaveProductMutation();
   const removeSavedProductMutation = useRemoveSavedProductMutation();
   const notifications = useNotifications();
+  const activeSaveMutation = saveProductMutation.isPending || removeSavedProductMutation.isPending;
 
   const isAnalysesLoading = analyses.some((query) => query.isLoading && !query.data);
   const analysisError = analyses.find((query) => query.error)?.error;
@@ -54,6 +60,50 @@ export default function SavedPage() {
     }));
   const savedCount = savedProductsQuery.data?.length || 0;
   const isInitialLoading = (savedProductsQuery.isLoading && !savedProductsQuery.data) || isAnalysesLoading;
+  const renderedProducts = useMemo(() => {
+    if (!cardTransitions.length) {
+      return products;
+    }
+
+    const result = [...products];
+    cardTransitions
+      .sort((left, right) => left.index - right.index)
+      .forEach((entry) => {
+        if (result.some((product) => product.product_id === entry.product.product_id)) {
+          return;
+        }
+        result.splice(
+          Math.min(entry.index, result.length),
+          0,
+          { ...entry.product, _transitionState: entry.transitionState },
+        );
+      });
+
+    return result;
+  }, [cardTransitions, products]);
+  const loadingScreenConfig = useMemo(() => {
+    if (activeSaveMutation && pendingProductId !== null) {
+      return {
+        eyebrow: "Updating your shortlist",
+        title: "Give Us a Moment While We Update Your Favorites",
+        message:
+          "We’re syncing your saved products and refreshing the collection behind the scenes.",
+        chips: ["Saving changes", "Updating your collection", "Refreshing product details"],
+      };
+    }
+
+    if (isInitialLoading) {
+      return {
+        eyebrow: "Loading your saved products",
+        title: "Give Us a Moment While We Gather Your Favorites",
+        message:
+          "We’re pulling in your shortlist and rebuilding the detailed fit breakdown for each pick.",
+        chips: ["Loading your shortlist", "Scoring saved products", "Preparing your collection"],
+      };
+    }
+
+    return null;
+  }, [activeSaveMutation, isInitialLoading, pendingProductId]);
 
   useNotificationEffect(
     collectionError,
@@ -66,20 +116,44 @@ export default function SavedPage() {
     [saveProductMutation.error, removeSavedProductMutation.error],
   );
 
+  const queueCardTransition = (product, transitionState) => {
+    const index = renderedProducts.findIndex((entry) => entry.product_id === product.product_id);
+    setCardTransitions((current) => [
+      ...current.filter((entry) => entry.product.product_id !== product.product_id),
+      {
+        product,
+        transitionState,
+        index: index >= 0 ? index : 0,
+      },
+    ]);
+
+    window.setTimeout(() => {
+      setCardTransitions((current) =>
+        current.filter((entry) => entry.product.product_id !== product.product_id),
+      );
+    }, cardExitDurationMs);
+  };
+
   const toggleSave = async (product) => {
-    if (product.saved) {
-      await removeSavedProductMutation.mutateAsync(product.product_id);
-      notifications.info(`${product.product_name} removed from saved.`, {
-        title: "Removed from saved",
+    queueCardTransition(product, product.saved ? "releasing" : "saving");
+    setPendingProductId(product.product_id);
+    try {
+      if (product.saved) {
+        await removeSavedProductMutation.mutateAsync(product.product_id);
+        notifications.info(`${product.product_name} removed from saved.`, {
+          title: "Removed from saved",
+          duration: 2800,
+        });
+        return;
+      }
+      await saveProductMutation.mutateAsync(product.product_id);
+      notifications.success(`${product.product_name} added to your saved list.`, {
+        title: "Saved product",
         duration: 2800,
       });
-      return;
+    } finally {
+      setPendingProductId((current) => (current === product.product_id ? null : current));
     }
-    await saveProductMutation.mutateAsync(product.product_id);
-    notifications.success(`${product.product_name} added to your saved list.`, {
-      title: "Saved product",
-      duration: 2800,
-    });
   };
 
   return (
@@ -121,13 +195,14 @@ export default function SavedPage() {
             </Reveal>
           ) : (
             <StaggerGroup style={productGridStyle}>
-              {products.map((product, index) => (
-                <Reveal key={product.product_id} index={index} variant="bounce">
+              {renderedProducts.map((product, index) => (
+                <Reveal key={product.product_id} index={index} variant="reveal" className="product-card-reveal">
                   <ProductCard
                     product={product}
                     onOpen={() => navigate(`/products/${product.product_id}`)}
                     onToggleSave={() => toggleSave(product)}
-                    isBusy={saveProductMutation.isPending || removeSavedProductMutation.isPending}
+                    isBusy={activeSaveMutation && pendingProductId === product.product_id}
+                    transitionState={product._transitionState || "idle"}
                   />
                 </Reveal>
               ))}
@@ -135,6 +210,7 @@ export default function SavedPage() {
           )}
         </div>
       </div>
+      <LoadingScreen active={isInitialLoading} {...loadingScreenConfig} />
     </PageTransition>
   );
 }

@@ -1,12 +1,27 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { useSessionQuery } from "../api/hooks";
+import { setUnauthorizedHandler } from "../api/client";
+import { clearAuthScopedQueries, useSessionQuery } from "../api/hooks";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
+  const queryClient = useQueryClient();
   const sessionQuery = useSessionQuery();
   const user = sessionQuery.data ?? null;
+
+  useEffect(() => {
+    const clearAuthState = () => clearAuthScopedQueries(queryClient);
+    setUnauthorizedHandler(clearAuthState);
+    return () => setUnauthorizedHandler(null);
+  }, [queryClient]);
+
+  useEffect(() => {
+    if (!sessionQuery.isLoading && !user) {
+      clearAuthScopedQueries(queryClient);
+    }
+  }, [queryClient, sessionQuery.isLoading, user]);
 
   return (
     <AuthContext.Provider

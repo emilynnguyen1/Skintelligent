@@ -36,7 +36,6 @@ export default function ChipSelect({ items, selected, onChange, multi = true }) 
             onClick={() => toggle(item.value)}
             style={{ ...chipStyle(isActive(item.value)), "--stagger-index": index }}
           >
-            {isActive(item.value) ? "Selected: " : ""}
             {item.label}
           </button>
         );

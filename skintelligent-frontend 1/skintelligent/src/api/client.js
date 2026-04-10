@@ -1,4 +1,5 @@
 const API_PREFIX = "/api";
+let unauthorizedHandler = null;
 
 export class ApiError extends Error {
   constructor(message, status, data = null) {
@@ -7,6 +8,10 @@ export class ApiError extends Error {
     this.status = status;
     this.data = data;
   }
+}
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = typeof handler === "function" ? handler : null;
 }
 
 function buildUrl(path, params = {}) {
@@ -38,6 +43,9 @@ async function request(path, { method = "GET", params, body } = {}) {
     : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith("/auth/login")) {
+      unauthorizedHandler?.();
+    }
     const message =
       payload?.detail ||
       payload?.message ||
@@ -50,11 +58,13 @@ async function request(path, { method = "GET", params, body } = {}) {
 }
 
 export const api = {
+  getAuthConfig: () => request("/auth/config"),
   getSessionUser: () => request("/auth/me"),
   login: (payload) => request("/auth/login", { method: "POST", body: payload }),
   signup: (payload) => request("/auth/register", { method: "POST", body: payload }),
   logout: () => request("/auth/logout", { method: "POST" }),
   getMe: () => request("/me"),
+  updateMe: (payload) => request("/me", { method: "PATCH", body: payload }),
   getProfile: () => request("/me/profile"),
   upsertProfile: (payload) => request("/me/profile", { method: "PUT", body: payload }),
   getRecommendations: ({ limit = 6, useCached = true } = {}) =>

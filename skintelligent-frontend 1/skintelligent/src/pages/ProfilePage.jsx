@@ -1,8 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
+import { useNavigate } from "react-router-dom";
 
-import { useProfileQuery, useUpsertProfileMutation } from "../api/hooks";
+import { useGenerateRecommendationsMutation, useProfileQuery, useUpsertProfileMutation } from "../api/hooks";
 import ChipSelect from "../components/ChipSelect";
+import LoadingScreen from "../components/LoadingScreen";
 import { PageTransition, Reveal } from "../components/Motion";
 import { ProfileFormSkeleton } from "../components/PageSkeletons";
 import { formatApiError } from "../lib/formatters";
@@ -32,19 +34,22 @@ function FieldBlock({ label, children, delay = 0 }) {
 }
 
 export default function ProfilePage() {
+  const navigate = useNavigate();
+  const [isApplyingProfile, setIsApplyingProfile] = useState(false);
   const profileQuery = useProfileQuery();
   const upsertProfileMutation = useUpsertProfileMutation();
+  const generateRecommendationsMutation = useGenerateRecommendationsMutation();
   const notifications = useNotifications();
   const { watch, setValue, handleSubmit, reset } = useForm({
     defaultValues: defaultProfileValues,
   });
   const values = watch();
-  const profileError = formatApiError(upsertProfileMutation.error);
+  const profileError = formatApiError(upsertProfileMutation.error || generateRecommendationsMutation.error);
 
   useNotificationEffect(
     profileError,
     (api, message) => api.error(message, { title: "Couldn't save profile" }),
-    [upsertProfileMutation.error],
+    [generateRecommendationsMutation.error, upsertProfileMutation.error],
   );
 
   useEffect(() => {
@@ -57,8 +62,15 @@ export default function ProfilePage() {
   }, [profileQuery.data, reset]);
 
   const onSubmit = async () => {
-    await upsertProfileMutation.mutateAsync(values);
-    notifications.success("Your skin profile is up to date.", { title: "Profile saved" });
+    setIsApplyingProfile(true);
+    try {
+      await upsertProfileMutation.mutateAsync(values);
+      await generateRecommendationsMutation.mutateAsync({ limit: 6 });
+      notifications.success("Your skin profile is up to date.", { title: "Profile saved" });
+      navigate("/dashboard", { replace: true });
+    } finally {
+      setIsApplyingProfile(false);
+    }
   };
 
   return (
@@ -148,7 +160,7 @@ export default function ProfilePage() {
                 style={s.chip(values.acne_prone)}
                 onClick={() => setValue("acne_prone", !values.acne_prone, { shouldDirty: true })}
               >
-                {values.acne_prone ? "Selected: " : ""}Acne-prone
+                Acne-prone
               </button>
               <button
                 type="button"
@@ -158,7 +170,7 @@ export default function ProfilePage() {
                   setValue("fragrance_allergy", !values.fragrance_allergy, { shouldDirty: true })
                 }
               >
-                {values.fragrance_allergy ? "Selected: " : ""}Fragrance allergy
+                Fragrance allergy
               </button>
             </Reveal>
 
@@ -167,13 +179,22 @@ export default function ProfilePage() {
               className="motion-button"
               style={s.btnPrimary}
               onClick={handleSubmit(onSubmit)}
-              disabled={upsertProfileMutation.isPending}
+              disabled={upsertProfileMutation.isPending || generateRecommendationsMutation.isPending}
             >
-              {upsertProfileMutation.isPending ? "Saving..." : "Save Changes"}
+              {upsertProfileMutation.isPending || generateRecommendationsMutation.isPending
+                ? "Saving..."
+                : "Save Changes"}
             </button>
           </Reveal>
         )}
       </div>
+      <LoadingScreen
+        active={isApplyingProfile}
+        eyebrow="Updating your profile"
+        title="Give Us a Moment While We Refresh Your Perfect Skin"
+        message="We're saving your updated skin profile and rebuilding the best matches for your new combination."
+        chips={["Saving your profile", "Refreshing recommendation scores", "Preparing your dashboard"]}
+      />
     </PageTransition>
   );
 }

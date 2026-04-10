@@ -90,4 +90,25 @@ describe("NotificationProvider", () => {
 
     expect(screen.queryByText("Profile updated.")).not.toBeInTheDocument();
   });
+
+  it("lets the close button dismiss without starting a drag gesture", () => {
+    renderNotifications();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show toast" }));
+    const toast = screen.getByRole("status");
+    const closeButton = screen.getByRole("button", { name: "Dismiss notification" });
+
+    fireEvent.pointerDown(closeButton, { pointerId: 3, clientY: 120 });
+
+    expect(toast).toHaveStyle({ transform: "translateY(0px) scale(1)" });
+
+    fireEvent.pointerUp(closeButton, { pointerId: 3, clientY: 120 });
+    fireEvent.click(closeButton);
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(screen.queryByText("Profile updated.")).not.toBeInTheDocument();
+  });
 });

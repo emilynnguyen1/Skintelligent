@@ -2,6 +2,12 @@ function option(label, value = label.toLowerCase()) {
   return { label, value };
 }
 
+export const genderOptions = [
+  option("Male", "male"),
+  option("Female", "female"),
+  option("Prefer not to say", "prefer not to say"),
+];
+
 export const skinTypeOptions = [
   option("Oily", "oily"),
   option("Dry", "dry"),

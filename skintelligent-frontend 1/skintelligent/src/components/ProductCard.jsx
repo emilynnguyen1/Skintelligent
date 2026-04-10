@@ -7,17 +7,29 @@ function toPercent(score) {
   return Math.round(score * 100);
 }
 
-export default function ProductCard({ product, onOpen, onToggleSave, isBusy = false }) {
+export default function ProductCard({
+  product,
+  onOpen,
+  onToggleSave,
+  isBusy = false,
+  transitionState = "idle",
+}) {
   const score = product.final_score !== undefined ? toPercent(product.final_score) : null;
   const primaryReason = product.reason_codes?.[0] || "Saved to revisit later.";
+  const isExiting = transitionState !== "idle";
 
   return (
     <div
-      className="motion-card motion-liquid-surface"
+      className={`motion-liquid-surface product-card-shell ${
+        isExiting ? `product-card-shell--${transitionState}` : ""
+      }`.trim()}
       role="button"
       tabIndex={0}
-      onClick={onOpen}
+      onClick={isExiting ? undefined : onOpen}
       onKeyDown={(event) => {
+        if (isExiting) {
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen();
@@ -27,11 +39,14 @@ export default function ProductCard({ product, onOpen, onToggleSave, isBusy = fa
         ...s.card,
         position: "relative",
         overflow: "hidden",
-        cursor: "pointer",
+        backdropFilter: "none",
+        WebkitBackdropFilter: "none",
+        cursor: isExiting ? "default" : "pointer",
         minHeight: 430,
         height: "100%",
         display: "flex",
         flexDirection: "column",
+        opacity: isExiting ? 0.96 : 1,
       }}
     >
       <div
@@ -46,21 +61,23 @@ export default function ProductCard({ product, onOpen, onToggleSave, isBusy = fa
       />
 
       <button
-        className={`motion-save-toggle motion-press ${product.saved ? "is-saved" : ""}`.trim()}
+        className={`motion-save-toggle motion-press ${
+          product.saved ? "is-saved" : ""
+        } ${isBusy ? "is-saving" : ""}`.trim()}
         type="button"
         aria-label={product.saved ? "Remove saved product" : "Save product"}
         onClick={(event) => {
           event.stopPropagation();
           onToggleSave();
         }}
-        disabled={isBusy}
+        disabled={isBusy || isExiting}
         style={{
           position: "absolute",
           top: "1rem",
           right: "1rem",
           fontSize: "1.1rem",
           opacity: 0.78,
-          cursor: isBusy ? "wait" : "pointer",
+          cursor: isExiting ? "default" : "pointer",
           background: "none",
           border: "none",
           color: product.saved ? colors.deepRose : colors.lightMid,

@@ -10,6 +10,7 @@ import {
   useSavedProductsQuery,
   useSaveProductMutation,
 } from "../api/hooks";
+import LoadingScreen from "../components/LoadingScreen";
 import { PageTransition, Reveal, StaggerGroup } from "../components/Motion";
 import { DashboardHeroSkeleton, SectionHeadingSkeleton } from "../components/PageSkeletons";
 import ProductCard from "../components/ProductCard";
@@ -20,6 +21,10 @@ import { useAuth } from "../providers/AuthProvider";
 import { useNotifications } from "../providers/NotificationProvider";
 import { colors, fonts } from "../styles/tokens";
 import * as s from "../styles/shared";
+
+const dashboardFetchLimit = 12;
+const dashboardVisibleLimit = 6;
+const cardExitDurationMs = 520;
 
 function profileLabels(profile) {
   if (!profile) {
@@ -50,13 +55,16 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [filter, setFilter] = useState("all");
+  const [pendingProductId, setPendingProductId] = useState(null);
+  const [cardTransitions, setCardTransitions] = useState([]);
   const meQuery = useMeQuery(true);
-  const recommendationsQuery = useRecommendationsQuery({ limit: 6, useCached: true }, true);
-  const productsQuery = usePersonalizedProductsQuery({ limit: 6 }, true);
+  const recommendationsQuery = useRecommendationsQuery({ limit: dashboardVisibleLimit, useCached: true }, true);
+  const productsQuery = usePersonalizedProductsQuery({ limit: dashboardFetchLimit }, true);
   const savedProductsQuery = useSavedProductsQuery(true);
   const generateRecommendationsMutation = useGenerateRecommendationsMutation();
   const saveProductMutation = useSaveProductMutation();
   const removeSavedProductMutation = useRemoveSavedProductMutation();
+  const activeSaveMutation = saveProductMutation.isPending || removeSavedProductMutation.isPending;
 
   const displayUser = meQuery.data || user;
   const products = productsQuery.data || [];
@@ -86,32 +94,121 @@ export default function DashboardPage() {
   );
 
   const filteredProducts = useMemo(() => {
+    const discoveryProducts = products.filter((product) => !product.saved);
+
     if (filter === "high-fit") {
-      return products.filter((product) => product.final_score >= 0.75);
+      return discoveryProducts
+        .filter((product) => product.final_score >= 0.75)
+        .slice(0, dashboardVisibleLimit);
     }
     if (filter === "saved") {
-      return products.filter((product) => product.saved);
+      return products.filter((product) => product.saved).slice(0, dashboardVisibleLimit);
     }
-    return products;
+    return discoveryProducts.slice(0, dashboardVisibleLimit);
   }, [filter, products]);
 
+  const renderedProducts = useMemo(() => {
+    if (!cardTransitions.length) {
+      return filteredProducts;
+    }
+
+    const result = [...filteredProducts];
+    cardTransitions
+      .filter((entry) => entry.view === filter)
+      .sort((left, right) => left.index - right.index)
+      .forEach((entry) => {
+        if (result.some((product) => product.product_id === entry.product.product_id)) {
+          return;
+        }
+        result.splice(
+          Math.min(entry.index, result.length),
+          0,
+          { ...entry.product, _transitionState: entry.transitionState },
+        );
+      });
+
+    return result.slice(0, dashboardVisibleLimit);
+  }, [cardTransitions, filter, filteredProducts]);
+
+  const loadingScreenConfig = useMemo(() => {
+    if (generateRecommendationsMutation.isPending) {
+      return {
+        eyebrow: "Refreshing your routine",
+        title: "Give Us a Moment While We Refresh Your Perfect Skin",
+        message:
+          "We’re re-ranking your top products and checking the best fit for your updated shortlist.",
+        chips: ["Refreshing scores", "Checking ingredient fit", "Rebuilding your feed"],
+      };
+    }
+
+    if (activeSaveMutation && pendingProductId !== null) {
+      return {
+        eyebrow: "Updating your shortlist",
+        title: "Give Us a Moment While We Update Your Favorites",
+        message:
+          "We’re saving your latest pick and smoothing the next recommendations into view.",
+        chips: ["Saving your favorite", "Preparing the next best match", "Updating your shortlist"],
+      };
+    }
+
+    if (isInitialLoading) {
+      return {
+        eyebrow: "Loading your recommendations",
+        title: "Give Us a Moment While We Load Your Perfect Skin",
+        message:
+          "We’re pulling your profile, saved products, and recommended matches into one view.",
+        chips: ["Loading your profile", "Fetching product matches", "Preparing your dashboard"],
+      };
+    }
+
+    return null;
+  }, [
+    activeSaveMutation,
+    generateRecommendationsMutation.isPending,
+    isInitialLoading,
+    pendingProductId,
+  ]);
+
+  const queueCardTransition = (product, transitionState) => {
+    const index = renderedProducts.findIndex((entry) => entry.product_id === product.product_id);
+    setCardTransitions((current) => [
+      ...current.filter((entry) => entry.product.product_id !== product.product_id),
+      {
+        product,
+        transitionState,
+        view: product.saved ? "saved" : filter,
+        index: index >= 0 ? index : 0,
+      },
+    ]);
+
+    window.setTimeout(() => {
+      setCardTransitions((current) =>
+        current.filter((entry) => entry.product.product_id !== product.product_id),
+      );
+    }, cardExitDurationMs);
+  };
+
   const toggleSave = async (product) => {
-    if (product.saved) {
-      await removeSavedProductMutation.mutateAsync(product.product_id);
-      notifications.info(`${product.product_name} removed from saved.`, {
+    queueCardTransition(product, product.saved ? "releasing" : "saving");
+    setPendingProductId(product.product_id);
+    try {
+      if (product.saved) {
+        await removeSavedProductMutation.mutateAsync(product.product_id);
+        notifications.info(`${product.product_name} removed from saved.`, {
         title: "Removed from saved",
         duration: 2800,
       });
-      return;
+        return;
+      }
+      await saveProductMutation.mutateAsync(product.product_id);
+      notifications.success(`${product.product_name} added to your saved list.`, {
+        title: "Saved product",
+        duration: 2800,
+      });
+    } finally {
+      setPendingProductId((current) => (current === product.product_id ? null : current));
     }
-    await saveProductMutation.mutateAsync(product.product_id);
-    notifications.success(`${product.product_name} added to your saved list.`, {
-      title: "Saved product",
-      duration: 2800,
-    });
   };
-
-  const activeSaveMutation = saveProductMutation.isPending || removeSavedProductMutation.isPending;
 
   return (
     <PageTransition style={{ ...s.page, paddingTop: "6rem" }}>
@@ -271,13 +368,14 @@ export default function DashboardPage() {
             </div>
           ) : filteredProducts.length ? (
             <StaggerGroup style={productGridStyle}>
-              {filteredProducts.map((product, index) => (
-                <Reveal key={product.product_id} index={index} variant="bounce">
+              {renderedProducts.map((product, index) => (
+                <Reveal key={product.product_id} index={index} variant="reveal" className="product-card-reveal">
                   <ProductCard
                     product={product}
                     onOpen={() => navigate(`/products/${product.product_id}`)}
                     onToggleSave={() => toggleSave(product)}
-                    isBusy={activeSaveMutation}
+                    isBusy={activeSaveMutation && pendingProductId === product.product_id}
+                    transitionState={product._transitionState || "idle"}
                   />
                 </Reveal>
               ))}
@@ -292,6 +390,10 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+      <LoadingScreen
+        active={generateRecommendationsMutation.isPending || isInitialLoading}
+        {...loadingScreenConfig}
+      />
     </PageTransition>
   );
 }

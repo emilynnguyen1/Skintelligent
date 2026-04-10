@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
 
-import { useSignupMutation } from "../api/hooks";
+import { useAuthConfigQuery, useSignupMutation } from "../api/hooks";
 import { PageTransition, Reveal } from "../components/Motion";
+import TurnstileChallenge, { getTurnstileSiteKey, isTurnstileEnabled } from "../components/TurnstileChallenge";
 import { useNotificationEffect } from "../hooks/useNotificationEffect";
 import { formatApiError } from "../lib/formatters";
 import { colors } from "../styles/tokens";
@@ -10,13 +12,23 @@ import * as s from "../styles/shared";
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const formStartedAtRef = useRef(new Date().toISOString());
+  const turnstileRef = useRef(null);
+  const authConfigQuery = useAuthConfigQuery();
+  const configuredSiteKey = authConfigQuery.data?.turnstile_site_key || "";
+  const turnstileSiteKey = getTurnstileSiteKey(configuredSiteKey || undefined);
+  const turnstileRequired = authConfigQuery.isSuccess && Boolean(authConfigQuery.data?.turnstile_required);
+  const turnstileEnabled = Boolean(turnstileSiteKey) || isTurnstileEnabled();
   const signupMutation = useSignupMutation();
   const signupError = formatApiError(signupMutation.error);
+  const [turnstileResetNonce, setTurnstileResetNonce] = useState(0);
+  const [captchaToken, setCaptchaToken] = useState("");
   const { register, handleSubmit, formState } = useForm({
     defaultValues: {
       name: "",
       email: "",
       password: "",
+      website: "",
     },
   });
 
@@ -26,9 +38,28 @@ export default function SignupPage() {
     [signupMutation.error],
   );
 
+  useEffect(() => {
+    if (!signupMutation.error || !turnstileEnabled) {
+      return;
+    }
+    turnstileRef.current?.reset();
+    setTurnstileResetNonce((current) => current + 1);
+  }, [signupMutation.error, turnstileEnabled]);
+
   const onSubmit = async (values) => {
-    const payload = await signupMutation.mutateAsync(values);
-    navigate(payload.user.profile ? "/dashboard" : "/onboarding", { replace: true });
+    try {
+      const payload = await signupMutation.mutateAsync({
+        ...values,
+        captcha_token: captchaToken || undefined,
+        form_started_at: formStartedAtRef.current,
+      });
+      navigate(payload.user.profile ? "/dashboard" : "/onboarding", { replace: true });
+    } catch {
+      if (turnstileEnabled) {
+        turnstileRef.current?.reset("Verification refreshed after the failed attempt.");
+        setTurnstileResetNonce((current) => current + 1);
+      }
+    }
   };
 
   return (
@@ -59,6 +90,13 @@ export default function SignupPage() {
           style={{ display: "flex", flexDirection: "column", gap: "0.8rem", marginBottom: "1.5rem" }}
         >
           <input
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden="true"
+            style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+            {...register("website")}
+          />
+          <input
             placeholder="Full name"
             className="motion-input motion-liquid-focus"
             style={s.input}
@@ -78,12 +116,46 @@ export default function SignupPage() {
             style={s.input}
             {...register("password", { required: true, minLength: 8 })}
           />
+          <TurnstileChallenge
+            ref={turnstileRef}
+            onTokenChange={setCaptchaToken}
+            siteKey={turnstileSiteKey || undefined}
+            required={turnstileRequired}
+            resetNonce={turnstileResetNonce}
+          />
+          {turnstileEnabled ? (
+            <button
+              type="button"
+              className="motion-link"
+              style={{
+                alignSelf: "center",
+                background: "none",
+                border: "none",
+                color: colors.deepRose,
+                cursor: "pointer",
+                fontSize: "0.8rem",
+                padding: 0,
+                textDecoration: "underline",
+              }}
+              onClick={() => {
+                turnstileRef.current?.reset("Verification reset. Please try again.");
+                setTurnstileResetNonce((current) => current + 1);
+              }}
+            >
+              Reset verification
+            </button>
+          ) : null}
         </Reveal>
 
         <button
           type="submit"
           className="motion-button"
-          disabled={signupMutation.isPending || formState.isSubmitting}
+          disabled={
+            signupMutation.isPending ||
+            formState.isSubmitting ||
+            (turnstileEnabled && !captchaToken) ||
+            (turnstileRequired && !turnstileSiteKey)
+          }
           style={{ ...s.btnPrimary, width: "100%", padding: "0.9rem" }}
         >
           {signupMutation.isPending ? "Creating account..." : "Create Account"}

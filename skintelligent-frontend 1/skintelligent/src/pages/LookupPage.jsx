@@ -165,7 +165,7 @@ export default function LookupPage() {
                 }}
               >
                 {productsQuery.data.map((product, index) => (
-                  <Reveal key={product.product_id} index={index} variant="bounce">
+                  <Reveal key={product.product_id} index={index} variant="reveal" className="product-card-reveal">
                     <ProductCard
                       product={product}
                       onOpen={() => navigate(`/products/${product.product_id}`)}
